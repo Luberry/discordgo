@@ -10,6 +10,7 @@
 package discordgo
 
 import (
+	"encoding/json"
 	"io"
 	"regexp"
 	"strings"
@@ -37,7 +38,8 @@ const (
 	MessageTypeGuildDiscoveryDisqualified            MessageType = 14
 	MessageTypeGuildDiscoveryRequalified             MessageType = 15
 	MessageTypeReply                                 MessageType = 19
-	MessageTypeApplicationCommand                    MessageType = 20
+	MessageTypeChatInputCommand                      MessageType = 20
+	MessageTypeContextMenuCommand                    MessageType = 23
 )
 
 // A Message stores all data related to a specific Discord message.
@@ -80,6 +82,9 @@ type Message struct {
 	// A list of attachments present in the message.
 	Attachments []*MessageAttachment `json:"attachments"`
 
+	// A list of components attached to the message.
+	Components []MessageComponent `json:"-"`
+
 	// A list of embeds present in the message. Multiple
 	// embeds can currently only be sent by webhooks.
 	Embeds []*MessageEmbed `json:"embeds"`
@@ -116,13 +121,34 @@ type Message struct {
 	// Is sent with Rich Presence-related chat embeds
 	Application *MessageApplication `json:"application"`
 
-	// MessageReference contains reference data sent with crossposted messages
+	// MessageReference contains reference data sent with crossposted or reply messages.
+	// This does not contain the reference *to* this message; this is for when *this* message references another.
+	// To generate a reference to this message, use (*Message).Reference().
 	MessageReference *MessageReference `json:"message_reference"`
 
 	// The flags of the message, which describe extra features of a message.
 	// This is a combination of bit masks; the presence of a certain permission can
 	// be checked by performing a bitwise AND between this int and the flag.
 	Flags MessageFlags `json:"flags"`
+}
+
+// UnmarshalJSON is a helper function to unmarshal the Message.
+func (m *Message) UnmarshalJSON(data []byte) error {
+	type message Message
+	var v struct {
+		message
+		RawComponents []unmarshalableMessageComponent `json:"components"`
+	}
+	err := json.Unmarshal(data, &v)
+	if err != nil {
+		return err
+	}
+	*m = Message(v.message)
+	m.Components = make([]MessageComponent, len(v.RawComponents))
+	for i, v := range v.RawComponents {
+		m.Components[i] = v.MessageComponent
+	}
+	return err
 }
 
 // GetCustomEmojis pulls out all the custom (Non-unicode) emojis from a message and returns a Slice of the Emoji struct.
@@ -168,6 +194,7 @@ type MessageSend struct {
 	Content         string                  `json:"content,omitempty"`
 	Embed           *MessageEmbed           `json:"embed,omitempty"`
 	TTS             bool                    `json:"tts"`
+	Components      []MessageComponent      `json:"components"`
 	Files           []*File                 `json:"-"`
 	AllowedMentions *MessageAllowedMentions `json:"allowed_mentions,omitempty"`
 	Reference       *MessageReference       `json:"message_reference,omitempty"`
@@ -180,6 +207,7 @@ type MessageSend struct {
 // is also where you should get the instance from.
 type MessageEdit struct {
 	Content         *string                 `json:"content,omitempty"`
+	Components      []MessageComponent      `json:"components"`
 	Embed           *MessageEmbed           `json:"embed,omitempty"`
 	AllowedMentions *MessageAllowedMentions `json:"allowed_mentions,omitempty"`
 
